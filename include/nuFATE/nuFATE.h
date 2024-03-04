@@ -125,6 +125,7 @@ class nuFATE {
   private:
     int newflavor_;
     double newgamma_;
+    std::string energy_filename; 
     std::string newh5_filename_;
   public:
     /// \brief Constructor
@@ -133,6 +134,18 @@ class nuFATE {
     /// @param h5_filename name of hdf5 file containing the cross sections.
     /// @param include_secondaries if true secondaries are added to the flux propagation.
     nuFATE(int flv, double gamma, std::string h5_filename, bool include_secondaries);
+    /// \brief Constructor
+    /// @param flavor position ID of the system (1:NuE, -1:NuEBar, 2:NuMu, -2:NuMuBar, 3:NuTau, -3:NuTauBar)
+    /// @param gamma spectral index of input flux.
+    /// @param h5_filename name of hdf5 file containing the cross sections.
+    /// @param include_secondaries if true secondaries are added to the flux propagation.
+    nuFATE(int flv, double gamma, std::string h5_filename, bool include_secondaries, const std::vector<double>& radialbounds, const std::vector<double>& radialdensities);
+    // /// \brief Constructor
+    // /// @param flavor position ID of the system (1:NuE, -1:NuEBar, 2:NuMu, -2:NuMuBar, 3:NuTau, -3:NuTauBar)
+    // /// @param energy_filename file containing the desired energy spectrum
+    // /// @param h5_filename name of hdf5 file containing the cross sections.
+    // /// @param include_secondaries if true secondaries are added to the flux propagation.
+    // nuFATE(int flv, std::string energy_filename, std::string h5_filename, bool include_secondaries);
     /// \brief Constructor
     /// @param flavor position ID of the system (1:NuE, -1:NuEBar, 2:NuMu, -2:NuMuBar, 3:NuTau, -3:NuTauBar)
     /// @param gamma spectral index of input flux.
@@ -155,6 +168,8 @@ class nuFATE {
     /// \brief Function to get Earth column density
     /// @param theta Zenith angle in radians.
     double getEarthColumnDensity(double theta);
+    /// \brief Function to get Earth column density given a shell model with specified list of bounds and const. densities
+    double getEarthColumnDensity_shells(double theta);
     /// \brief Function to get flavor
     int getFlavor() const;
     /// \brief Function to get input spectral index
@@ -196,6 +211,9 @@ class nuFATE {
     double readDoubleAttribute(hid_t, std::string) const;
     unsigned int readUIntAttribute(hid_t, std::string) const;
     std::vector<double> logspace(double min,double max,unsigned int samples) const;
+    double chord(double perpdist, double radius); 
+    void set_shellEarth(const std::vector<double> &radialbounds, const std::vector<double> &radialdensities);
+
   private:
     void AllocateMemoryForMembers(unsigned int num_nodes);
     void SetEnergyBinWidths();
@@ -215,6 +233,11 @@ class nuFATE {
     std::vector<double> phi_0_;
     std::vector<double> glashow_total_;
     std::vector<double> sig3_array_;
+
+    std::vector<double> shell_radialbounds_;
+    std::vector<double> shell_angularbounds_;
+    std::vector<double> shell_radialdensities_;
+
     std::shared_ptr<double> glashow_partial_;
     std::shared_ptr<double> dxs_array_;
     std::shared_ptr<double> tau_array_;
@@ -243,6 +266,8 @@ class nuFATE {
     bool add_tau_regeneration_ = true;
     bool add_glashow_term_= true;
     bool add_secondary_term_ = true;
+
+    bool use_shell_earth_ = false; 
 };
 
 }

@@ -5,7 +5,9 @@
 
 namespace nufate{
 
-nuFATE::nuFATE(int flavor, double gamma, std::string h5_filename, bool include_secondaries) : newflavor_(flavor), newgamma_(gamma), newh5_filename_(h5_filename), include_secondaries_(include_secondaries) {
+// constructor for nuFATE object, specifying a gamma spectral index for the energy flux
+nuFATE::nuFATE(int flavor, double gamma, std::string h5_filename, bool include_secondaries):
+  newflavor_(flavor), newgamma_(gamma), newh5_filename_(h5_filename), include_secondaries_(include_secondaries) {
     //A few sanity checks
     if(include_secondaries_ and (newflavor_ == 3 or newflavor_== -3))
       throw std::runtime_error("nuFATE::nuFATE Cannot Include secondaries for tau's.");
@@ -32,6 +34,74 @@ nuFATE::nuFATE(int flavor, double gamma, std::string h5_filename, bool include_s
     // set the initial flux
     SetInitialFlux();
 }
+
+// constructor for nuFATE object, specifying a gamma spectral index for the energy flux
+// this version uses the radial shell earth model
+nuFATE::nuFATE(int flavor, double gamma, std::string h5_filename, bool include_secondaries, const std::vector<double>& radialbounds, const std::vector<double>& radialdensities):
+  newflavor_(flavor), newgamma_(gamma), newh5_filename_(h5_filename), include_secondaries_(include_secondaries) {
+    //A few sanity checks
+    if(include_secondaries_ and (newflavor_ == 3 or newflavor_== -3))
+      throw std::runtime_error("nuFATE::nuFATE Cannot Include secondaries for tau's.");
+    if(not (newflavor_ == 3 or newflavor_ == -3 or newflavor_ == 2 or newflavor_ == -2 or newflavor_ == 1 or newflavor_ == -1))
+      throw std::runtime_error("nuFATE::nuFATE flavor has to be plus or minus 1,2,3.");
+    //open h5file containing cross sections (xsh5)
+    file_id_ = H5Fopen(h5_filename.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    root_id_ = H5Gopen(file_id_, "/", H5P_DEFAULT);
+    grptot_ = "/total_cross_sections";
+    grpdiff_ = "/differential_cross_sections";
+    hid_t group_id = H5Gopen(root_id_, grptot_.c_str(), H5P_DEFAULT);
+    //assign some important variables
+    Emax_ = readDoubleAttribute(group_id, "max_energy");
+    Emin_ = readDoubleAttribute(group_id, "min_energy");
+    NumNodes_ = readUIntAttribute(group_id, "number_energy_nodes");
+    // allocate memory
+    AllocateMemoryForMembers(NumNodes_);
+    //set energy nodes and deltaE
+    energy_nodes_ = logspace(Emin_, Emax_, NumNodes_);
+    // calculate and set energy bin widths
+    SetEnergyBinWidths();
+    // load cross sections from file
+    LoadCrossSectionFromHDF5();
+    // set the initial flux
+    SetInitialFlux();
+
+    if (radialdensities.size() != radialbounds.size() - 1){
+      throw std::runtime_error("Length of density vector must be 1 smaller than length of bounds vector!");
+    }
+    set_shellEarth(radialbounds, radialdensities);
+    use_shell_earth_ = true;
+}
+
+// // constructor for nuFATE object, specifying a custom energy spectrum in a file
+// nuFATE::nuFATE(int flavor, std::string energy_filename, std::string h5_filename, bool include_secondaries):
+//   newflavor_(flavor), newenergy_filename_(energy_filename), newh5_filename_(h5_filename), include_secondaries_(include_secondaries) {
+//     //A few sanity checks
+//     if(include_secondaries_ and (newflavor_ == 3 or newflavor_== -3))
+//       throw std::runtime_error("nuFATE::nuFATE Cannot Include secondaries for tau's.");
+//     if(not (newflavor_ == 3 or newflavor_ == -3 or newflavor_ == 2 or newflavor_ == -2 or newflavor_ == 1 or newflavor_ == -1))
+//       throw std::runtime_error("nuFATE::nuFATE flavor has to be plus or minus 1,2,3.");
+//     //open h5file containing cross sections (xsh5)
+//     file_id_ = H5Fopen(h5_filename.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+//     root_id_ = H5Gopen(file_id_, "/", H5P_DEFAULT);
+//     grptot_ = "/total_cross_sections";
+//     grpdiff_ = "/differential_cross_sections";
+//     hid_t group_id = H5Gopen(root_id_, grptot_.c_str(), H5P_DEFAULT);
+//     //assign some important variables
+//     Emax_ = readDoubleAttribute(group_id, "max_energy");
+//     Emin_ = readDoubleAttribute(group_id, "min_energy");
+//     NumNodes_ = readUIntAttribute(group_id, "number_energy_nodes");
+//     // allocate memory
+//     AllocateMemoryForMembers(NumNodes_);
+//     //set energy nodes and deltaE
+//     energy_nodes_ = logspace(Emin_, Emax_, NumNodes_);
+//     // calculate and set energy bin widths
+//     SetEnergyBinWidths();
+//     // load cross sections from file
+//     LoadCrossSectionFromHDF5();
+//     // set the initial flux
+//     SetInitialFlux();
+// }
+
 
 nuFATE::nuFATE(int flavor, double gamma, std::vector<double> energy_nodes, std::vector<double> sigma_array, std::vector<std::vector<double>> dsigma_dE, bool include_secondaries):
   newflavor_(flavor), include_secondaries_(include_secondaries)
@@ -128,6 +198,18 @@ void nuFATE::Init(double gamma, const std::vector<double> &energy_nodes, const s
   SetInitialFlux();
   SetCrossSectionsFromInput(sigma_array, dsigma_dE);
 }
+
+void nuFATE::set_shellEarth(const std::vector<double> &radialbounds, const std::vector<double> &radialdensities){
+  shell_radialbounds_ = radialbounds; 
+  shell_radialdensities_ = radialdensities; 
+
+  // calculate a vector of tangent angles based on the radius bounds
+  shell_angularbounds_.resize(shell_radialbounds_.size());
+  for (size_t i = 0; i < shell_angularbounds_.size(); ++i) {
+      shell_angularbounds_[i] = std::asin(shell_radialbounds_[i]); 
+  }
+}
+
 
 void nuFATE::SetCrossSectionsFromInput(const std::vector<double> &sigma_array, const std::vector<std::vector<double>> &dsigma_dE){
 
@@ -664,6 +746,41 @@ double nuFATE::rho_earth(double x, void * p){
 
     double rho = p1*std::pow(r,2)+p2*r+p3;
     return rho*1.0e-3;
+}
+
+double nuFATE::chord(double perpdist, double radius){
+  double chordlength;
+  chordlength = 2*std::sqrt(std::pow(radius,2) - std::pow(perpdist,2));
+  return chordlength; 
+}
+
+// bounds give the list of radii bounds between constant density shells. write as fraction of radius, i.e. in the range [0,1]
+// densities give list of densities in each shell region set by the bounds.
+double nuFATE::getEarthColumnDensity_shells(double theta){
+
+  double centerangle = pi - theta;
+
+  double col_density = 0; 
+
+  // loop to locate the angular zone of the trajectory, then sum to find total col density
+  for (size_t i = 1; i<shell_angularbounds_.size(); ++i) {
+
+    if (centerangle <= shell_angularbounds_[i] && centerangle > shell_angularbounds_[i-1]){
+
+      double d = REarth * std::sin(theta);
+      col_density += shell_radialdensities_[i-1]*chord(d, shell_radialbounds_[i]*REarth);
+
+      for (size_t j=i; j<shell_angularbounds_.size()-1; ++j){
+        col_density += shell_radialdensities_[j]*(chord(d, shell_radialbounds_[j+1]*REarth) - chord(d, shell_radialbounds_[j]*REarth));
+      }
+
+      break; 
+    }
+  }
+  // at this point the units are in g/cm3 * km
+  
+  col_density *= 100000; // convert to units of g/cm2
+  return col_density; 
 }
 
 double nuFATE::getEarthColumnDensity(double theta){
